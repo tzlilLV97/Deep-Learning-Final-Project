@@ -7,7 +7,70 @@ import torch.nn.functional as F
 import torch.optim as optim
 from sklearn.metrics import classification_report
 import xgboost as xgb
+from sklearn import svm
+from sklearn.neighbors import KNeighborsClassifier
 
+
+# Create the SVM model
+def estimate_accuracy_svm(model, data, labels, batch_size=5000, max_N=100000):
+    """
+    Estimate the accuracy of the model on the data. To reduce
+    computation time, use at most `max_N` elements of `data` to
+    produce the estimate.
+    """
+    correct = 0
+    N = 0
+    for i in range(0, len(data), batch_size):
+        # get a batch of data
+        xt, st = get_batch(data, labels, i, i + batch_size)
+        # forward pass prediction
+        y = model.predict(xt)
+        pred = np.squeeze(y)
+        correct += np.sum(pred==st)
+        N += len(st)
+
+        if N > max_N:
+            break
+    return correct / N
+
+def estimate_accuracy_KNN(model, data, labels, batch_size=5000, max_N=100000):
+    """
+    Estimate the accuracy of the model on the data. To reduce
+    computation time, use at most `max_N` elements of `data` to
+    produce the estimate.
+    """
+
+    correct = 0
+    N = 0
+    for i in range(0, len(data), batch_size):
+        # get a batch of data
+        xt, st = get_batch(data, labels, i, i + batch_size)
+        # forward pass prediction
+        y = model.predict(xt)
+        pred = np.squeeze(y)
+        correct += np.sum(pred==st)
+        N += len(st)
+        if N > max_N:
+            break
+    return correct / N
+def KNN(train,valid,test):
+    x_train, y_train = train
+    x_valid, y_valid = valid
+    x_test, y_test = test
+    model = KNeighborsClassifier(n_neighbors=5)
+    model.fit(x_train, y_train)
+    y_pred = model.predict(x_test)
+    print("KNN Accuracy on validation set: {:.2f}%".format(estimate_accuracy_KNN(model, x_valid, y_valid) * 100))
+    print("KNN Accuracy on test set: {:.2f}%".format(estimate_accuracy_KNN(model, x_test, y_test) * 100))
+def svmModel(train, valid, test):
+    x_train, y_train = train
+    x_valid, y_valid = valid
+    x_test, y_test = test
+    svm_model = svm.SVC()
+    svm_model.fit(x_train, y_train)
+    y_pred = svm_model.predict(x_test)
+    print("SVM Accuracy on validation set: {:.2f}%".format(estimate_accuracy_svm(svm_model, x_valid, y_valid) * 100))
+    print("SVM Accuracy on test set: {:.2f}%".format(estimate_accuracy_svm(svm_model, x_test, y_test) * 100))
 def compare_xgb_predictions(xgb_model, X, y):
     # Make predictions using the trained model
     xgb_predictions = xgb_model.predict(X)
@@ -21,7 +84,6 @@ def compare_xgb_predictions(xgb_model, X, y):
     for pred, label in zip(xgb_predictions, y):
         if pred == label:
             correct += 1
-
     # Calculate the accuracy of the predictions
     accuracy = correct / total
 
@@ -34,8 +96,10 @@ def xgb_classifier(train,valid,test):
     model = xgb.XGBClassifier()
     model.fit(x_train, y_train)
     y_pred = model.predict(x_test)
-    print(classification_report(y_test, y_pred))
-    print(compare_xgb_predictions(model, x_test, y_test))
+  #  print(classification_report(y_test, y_pred))
+    print("XGB Accuracy on validation set: {:.2f}%".format(compare_xgb_predictions(model, x_valid, y_valid) * 100))
+    print("XGB Accuracy on test set: {:.2f}%".format(compare_xgb_predictions(model, x_test, y_test) * 100))
+          #"compare_xgb_predictions(model, x_test, y_test))
 
 def data_preparation(df_first):
     df = df_first.iloc[:, [2, 5, 6, 7, 8, 9, 10, 11, 14, 17, 20, 23, 26, 27, 28, 29, 30, 36, 39, 42, 45, 48,  51, 52, 53, 54, 55]]
@@ -146,7 +210,7 @@ def make_prediction_torch(model, game_data):
     #  Write your code here
 
 def pytorch_gradient_descent(model, train_data,
-                                 validation_data,
+                                 validation_data,test_data,
                                  batch_size=100,
                                  learning_rate=0.001,
                                  weight_decay=0,
@@ -159,8 +223,6 @@ def pytorch_gradient_descent(model, train_data,
     ##EXTRA FEATURES
     droper = nn.Dropout(p=0.15)
     #droper = 0
-
-
 
     ## OPTIMIZER
     #optimizer = optim.SGD(model.parameters(), lr=learning_rate, momentum=weight_decay)
@@ -187,8 +249,6 @@ def pytorch_gradient_descent(model, train_data,
             else:
                 zs = model(xt)
             loss = criterion(st, zs)  # compute the total loss
-           # print("DEBUG")
-          #  print(loss)
             loss.backward()  # compute updates for each parameter
             optimizer.step()  # make the updates for each parameter
             optimizer.zero_grad()  # a clean up step for PyTorch
@@ -205,13 +265,23 @@ def pytorch_gradient_descent(model, train_data,
                 train_accs.append(train_acc)
                 val_acc = estimate_accuracy_torch(model, validation_data[0], validation_data[1])
                 val_accs.append(val_acc)
-                print("Iter %d. [Val Acc %.0f%%] [Train Acc %.0f%%, Loss %f]" % (
-                    n, val_acc * 100, train_acc * 100, train_cost))
+               # print("Iter %d. [Val Acc %.0f%%] [Train Acc %.0f%%, Loss %f]" % (
+                  #  n, val_acc * 100, train_acc * 100, train_cost))
 
             # increment the iteration number
         n += 1
 
         if n > max_iters:
+            train_cost = float(loss.detach().numpy())
+            train_acc = estimate_accuracy_torch(model, train_data[0], train_data[1])
+            train_accs.append(train_acc)
+            val_acc = estimate_accuracy_torch(model, validation_data[0], validation_data[1])
+            val_accs.append(val_acc)
+            print("Iter %d. [Val Acc %.0f%%] [Train Acc %.0f%%, Loss %f]" % (
+                n, val_acc * 100, train_acc * 100, train_cost))
+            print("NN Accuracy on Validation Set: %.0f%%" % (val_acc * 100))
+            print("NN Accuracy on Training Set: %.0f%%" % (train_acc * 100))
+            print("NN Accuracy on Test Set: %.0f%%" % (estimate_accuracy_torch(model, test_data[0], test_data[1]) * 100))
             return iters, losses, iters_sub, train_accs, val_accs
 def main():
     df = pd.read_csv("data/games.csv")
@@ -220,23 +290,25 @@ def main():
     len_train = int(0.8 * n)
     len_test = (n-int(len_train))//2
     len_val = len_test
-    xgb_run = 0
+    xgb_run = 1
+    run_svm = 1
+    run_KNN = 1
     NN = 1
     train, valid, test = (data[:len_train],labels[:len_train]), (data[len_train:len_train+len_test],labels[len_train:len_train+len_test]), (data[len_train+len_test:],labels[len_train+len_test:])
     if xgb_run:
         xgb_classifier(train, valid, test)
-        return
     if NN:
         pytorch_mlp = PyTorchMLP()
-        learning_curve_info = pytorch_gradient_descent(pytorch_mlp, train,valid ,batch_size=5000,
+        learning_curve_info = pytorch_gradient_descent(pytorch_mlp, train,valid ,test,batch_size=5000,
                                      learning_rate=0.0006,
                                      weight_decay=0.00001,
-                                     max_iters=27000)
+                                     max_iters=5000)
         plot_learning_curve(*learning_curve_info)
-    print("Length of train : ", len_train)
-    print("Length of test : ", len_test)
-    print("Length of validation : ",len_val)
-    print("Total Length : ",len(data))
+    if run_svm:
+        svmModel(train, valid, test)
+    if run_KNN:
+        KNN(train, valid, test)
+
 
 
 
