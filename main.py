@@ -6,10 +6,43 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from sklearn.metrics import classification_report
+import xgboost as xgb
 
+def compare_xgb_predictions(xgb_model, X, y):
+    # Make predictions using the trained model
+    xgb_predictions = xgb_model.predict(X)
+
+    # Round the predictions to 0 or 1
+    xgb_predictions = [round(pred) for pred in xgb_predictions]
+
+    # Compare the predictions with the real labels
+    correct = 0
+    total = len(y)
+    for pred, label in zip(xgb_predictions, y):
+        if pred == label:
+            correct += 1
+
+    # Calculate the accuracy of the predictions
+    accuracy = correct / total
+
+    return accuracy
+def xgb_classifier(train,valid,test):
+    x_train, y_train = train
+    x_valid, y_valid = valid
+    x_test, y_test = test
+    #  Write your code here
+    model = xgb.XGBClassifier()
+    model.fit(x_train, y_train)
+    y_pred = model.predict(x_test)
+    print(classification_report(y_test, y_pred))
+    print(compare_xgb_predictions(model, x_test, y_test))
 
 def data_preparation(df_first):
     df = df_first.iloc[:, [2, 5, 6, 7, 8, 9, 10, 11, 14, 17, 20, 23, 26, 27, 28, 29, 30, 36, 39, 42, 45, 48,  51, 52, 53, 54, 55]]
+    ## add 2, 5
+    ## NORMALIZE THE GAME DURATION
+    df['gameDuration'] = df['gameDuration'].apply(lambda x: np.log(x))
+    # print(df['gameDuration'])
     labels = df_first.iloc[:, 4].to_numpy() - 1
     df = df.to_numpy()
     return df, labels
@@ -18,10 +51,13 @@ class PyTorchMLP(nn.Module):
     def __init__(self, num_hidden=5):
         super(PyTorchMLP, self).__init__()
         self.input_size = 27#input_size
-        self.hidden_size = 27#hidden_size
+        self.hidden_size = 50#hidden_size
         self.fc1 = torch.nn.Linear(self.input_size, self.hidden_size)
         self.relu = torch.nn.ReLU()
-        self.fc2 = torch.nn.Linear(self.hidden_size, 1)
+        self.fc2 = torch.nn.Linear(self.hidden_size, self.hidden_size)
+        self.fc3 = torch.nn.Linear(self.hidden_size, 1)
+        self.fc4 = torch.nn.Linear(self.hidden_size, self.hidden_size)
+        self.fc5 = torch.nn.Linear(self.hidden_size, 1)
         self.sigmoid = torch.nn.Sigmoid()
     # self.flatten = nn.Flatten()
     #     self.linear_relu_stack = nn.Sequential(
@@ -37,9 +73,11 @@ class PyTorchMLP(nn.Module):
      #   self.num_hidden = num_hidden
     def forward(self, inp):
         hidden = self.fc1(inp)
-        relu = self.relu(hidden)
-        output = self.fc2(relu)
-        output = self.sigmoid(output)
+        relu = self.sigmoid(hidden)
+        ofc2 = self.fc2(relu)
+        relu = self.relu(ofc2)
+        ofc3 = self.fc3(relu)
+        output = self.sigmoid(ofc3)
         return output
         inp = self.flatten(inp)
         return self.linear_relu_stack(inp)
@@ -75,6 +113,7 @@ def estimate_accuracy_torch(model, data, labels, batch_size=5000, max_N=100000):
         pred = np.squeeze(y)
         correct += np.sum(pred==st)
         N += len(st)
+
         if N > max_N:
             break
     return correct / N
@@ -112,14 +151,22 @@ def pytorch_gradient_descent(model, train_data,
                                  learning_rate=0.001,
                                  weight_decay=0,
                                  max_iters=1000):
+    ##COSTS
     #criterion =nn.BCELoss()# nn.CrossEntropyLoss()
     #criterion = nn.NLLLoss()
     criterion = nn.MSELoss()
     #criterion = nn.CrossEntropyLoss()
+    ##EXTRA FEATURES
+    droper = nn.Dropout(p=0.15)
+    #droper = 0
+
+
+
+    ## OPTIMIZER
     #optimizer = optim.SGD(model.parameters(), lr=learning_rate, momentum=weight_decay)
     optimizer = optim.Adam(model.parameters(),
                           lr=learning_rate,
-                           weight_decay=weight_decay)
+                           weight_decay=weight_decay,eps=1e-09, amsgrad=False)
 
     iters, losses = [], []
     iters_sub, train_accs, val_accs = [], [], []
@@ -135,11 +182,10 @@ def pytorch_gradient_descent(model, train_data,
             xt = torch.Tensor(xt)
             st = st
             st = torch.Tensor(st).float().unsqueeze(1)
-
-            zs = model(xt) # compute prediction logit
-            ## get the pytorch tensor size of zs
-            ## use torch criterion to compute the loss from zs to st
-         #   print(st)
+            if droper:
+                zs = model(droper(xt)) # compute prediction logit, use dropout if wanted
+            else:
+                zs = model(xt)
             loss = criterion(st, zs)  # compute the total loss
            # print("DEBUG")
           #  print(loss)
@@ -163,10 +209,10 @@ def pytorch_gradient_descent(model, train_data,
                     n, val_acc * 100, train_acc * 100, train_cost))
 
             # increment the iteration number
-            n += 1
+        n += 1
 
-            if n > max_iters:
-                return iters, losses, iters_sub, train_accs, val_accs
+        if n > max_iters:
+            return iters, losses, iters_sub, train_accs, val_accs
 def main():
     df = pd.read_csv("data/games.csv")
     data, labels = data_preparation(df)
@@ -174,20 +220,24 @@ def main():
     len_train = int(0.8 * n)
     len_test = (n-int(len_train))//2
     len_val = len_test
+    xgb_run = 0
+    NN = 1
     train, valid, test = (data[:len_train],labels[:len_train]), (data[len_train:len_train+len_test],labels[len_train:len_train+len_test]), (data[len_train+len_test:],labels[len_train+len_test:])
-    pytorch_mlp = PyTorchMLP()
-    print(len(train[0][0]))
-    learning_curve_info = pytorch_gradient_descent(pytorch_mlp, train,valid ,batch_size=4000,
-                                     learning_rate=0.000101,
-                                     weight_decay=0.000000001,
+    if xgb_run:
+        xgb_classifier(train, valid, test)
+        return
+    if NN:
+        pytorch_mlp = PyTorchMLP()
+        learning_curve_info = pytorch_gradient_descent(pytorch_mlp, train,valid ,batch_size=5000,
+                                     learning_rate=0.0006,
+                                     weight_decay=0.00001,
                                      max_iters=27000)
-
-    plot_learning_curve(*learning_curve_info)
-    print(test[0][0])
+        plot_learning_curve(*learning_curve_info)
     print("Length of train : ", len_train)
     print("Length of test : ", len_test)
     print("Length of validation : ",len_val)
     print("Total Length : ",len(data))
+
 
 
 if __name__ == '__main__':
