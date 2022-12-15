@@ -53,6 +53,7 @@ def estimate_accuracy_KNN(model, data, labels, batch_size=5000, max_N=100000):
         if N > max_N:
             break
     return correct / N
+
 def KNN(train,valid,test):
     x_train, y_train = train
     x_valid, y_valid = valid
@@ -62,6 +63,7 @@ def KNN(train,valid,test):
     y_pred = model.predict(x_test)
     print("KNN Accuracy on validation set: {:.2f}%".format(estimate_accuracy_KNN(model, x_valid, y_valid) * 100))
     print("KNN Accuracy on test set: {:.2f}%".format(estimate_accuracy_KNN(model, x_test, y_test) * 100))
+
 def svmModel(train, valid, test):
     x_train, y_train = train
     x_valid, y_valid = valid
@@ -214,14 +216,14 @@ def pytorch_gradient_descent(model, train_data,
                                  batch_size=100,
                                  learning_rate=0.001,
                                  weight_decay=0,
-                                 max_iters=1000):
+                                 epochs=1000):
     ##COSTS
     #criterion =nn.BCELoss()# nn.CrossEntropyLoss()
     #criterion = nn.NLLLoss()
     criterion = nn.MSELoss()
     #criterion = nn.CrossEntropyLoss()
     ##EXTRA FEATURES
-    droper = nn.Dropout(p=0.15)
+    droper = nn.Dropout(p=0.10)
     #droper = 0
 
     ## OPTIMIZER
@@ -271,14 +273,14 @@ def pytorch_gradient_descent(model, train_data,
             # increment the iteration number
         n += 1
 
-        if n > max_iters:
+        if n > epochs:
             train_cost = float(loss.detach().numpy())
             train_acc = estimate_accuracy_torch(model, train_data[0], train_data[1])
             train_accs.append(train_acc)
             val_acc = estimate_accuracy_torch(model, validation_data[0], validation_data[1])
             val_accs.append(val_acc)
-            print("Iter %d. [Val Acc %.0f%%] [Train Acc %.0f%%, Loss %f]" % (
-                n, val_acc * 100, train_acc * 100, train_cost))
+            # print("Iter %d. [Val Acc %.0f%%] [Train Acc %.0f%%, Loss %f]" % (
+            #     n, val_acc * 100, train_acc * 100, train_cost))
             print("NN Accuracy on Validation Set: %.0f%%" % (val_acc * 100))
             print("NN Accuracy on Training Set: %.0f%%" % (train_acc * 100))
             print("NN Accuracy on Test Set: %.0f%%" % (estimate_accuracy_torch(model, test_data[0], test_data[1]) * 100))
@@ -300,10 +302,10 @@ def main():
     if NN:
         pytorch_mlp = PyTorchMLP()
         learning_curve_info = pytorch_gradient_descent(pytorch_mlp, train,valid ,test,batch_size=5000,
-                                     learning_rate=0.0006,
-                                     weight_decay=0.00001,
-                                     max_iters=5000)
-        plot_learning_curve(*learning_curve_info)
+                                     learning_rate=0.0016,
+                                     weight_decay=0.0000001,
+                                     epochs=200)
+       # plot_learning_curve(*learning_curve_info)
     if run_svm:
         svmModel(train, valid, test)
     if run_KNN:
